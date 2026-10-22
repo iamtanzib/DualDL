@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon48.png" alt="">
+    <div>
+      <h1>DualDL</h1>
+      <p id="status" class="checking"><span class="dot"></span><span id="statusText">Checking…</span></p>
+    </div>
+  </header>
+
+  <button id="open" class="secondary" hidden>Open DualDL</button>
+
+  <section class="card">
+    <label class="row">
+      <span>Capture downloads</span>
+      <input type="checkbox" id="enabled" class="switch">
+    </label>
+    <div class="sep"></div>
+    <label class="row">
+      <span>Turbo browsing <small id="turboNote" class="note"></small></span>
+      <input type="checkbox" id="turbo" class="switch">
+    </label>
+    <div class="sep"></div>
+    <label class="row">
+      <span>Skip files smaller than</span>
+      <span class="unit"><input type="number" id="minSize" min="0" step="1"> MB</span>
+    </label>
+  </section>
+
+  <button id="drive" class="primary" hidden>Download this Drive file</button>
+  <button id="driveFolder" class="primary" hidden>Download this whole folder</button>
+
+  <section class="card video" id="video" hidden>
+    <p class="video-title" id="videoTitle">This page has a video</p>
+    <div class="video-buttons">
+      <button class="primary small" data-mode="video" data-quality="best">Best video</button>
+      <button class="secondary small" data-mode="video" data-quality="1080">1080p</button>
+      <button class="secondary small" data-mode="audio" data-quality="best">MP3</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="send">
+      <input id="link" type="url" placeholder="Paste a link…" autocomplete="off">
+      <button id="send" class="primary small">Send</button>
+    </div>
+  </section>
+
+  <p id="toast" class="toast"></p>
+  <p class="hint">Right-click any link → <b>Download with DualDL</b></p>
+  <script src="popup.js"></script>
+</body>
+</html>

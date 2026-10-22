@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>DualDL</string>
+	<key>CFBundleDisplayName</key>
+	<string>DualDL</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.dualdl.mac</string>
+	<key>CFBundleExecutable</key>
+	<string>DualDL</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSLocationUsageDescription</key>
+	<string>DualDL shows the name of your Wi-Fi network next to its line. macOS only shares Wi-Fi names with apps that have Location access. DualDL never reads or stores your location.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>DualDL shows the name of your Wi-Fi network next to its line. macOS only shares Wi-Fi names with apps that have Location access. DualDL never reads or stores your location.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.dualdl.link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dualdl</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

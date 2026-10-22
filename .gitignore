@@ -1,0 +1,15 @@
+# build output (app bundle, icon set, screenshots) — recreated by build.sh / tests/run.sh
+build/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+._*
+
+# partial downloads, if you test the engines inside the repo
+*.dualdl-part
+*.dualdl.json
+.dualdl-*
