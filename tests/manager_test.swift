@@ -160,6 +160,30 @@ Thread.detachNewThread {
     check(waitFor(120) { DownloadManager.shared.items.first { $0.url == r }?.state == .completed }, "it resumes by itself and finishes")
     check(same(OUT + "/retry.bin", WORK + "/srv/retry.bin"), "the retried file is byte-identical")
 
+    // 7b. A signed link (S3 style) that expires: "link expired", no pointless retry; a new link
+    //     for the same file carries on with the same download instead of starting a second one
+    _ = shell("cp '\(WORK)/srv/a.bin' '\(WORK)/srv/podcast.bin'")
+    func signedLink(_ life: Int, _ extra: String = "") -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return SRV + "/signed/podcast.bin?X-Amz-Date=\(f.string(from: Date()))&X-Amz-Expires=\(life)&X-Amz-Signature=abc" + extra
+    }
+    let s1 = signedLink(4, "&drop=5")
+    onMain { _ = DownloadManager.shared.add(url: s1) }
+    check(waitFor(60) { DownloadManager.shared.items.first { $0.url == s1 }?.state == .failed }, "an expired signed link stops")
+    let expired = item(s1)
+    check(expired?.error?.contains("expired") == true && expired?.retryAt == nil,
+          "…saying the link expired, with no pointless retry", "\(expired?.error ?? "") \(String(describing: expired?.retryAt))")
+    let s2 = signedLink(600)
+    onMain { _ = DownloadManager.shared.add(url: s2, filename: "podcast.bin") }
+    check(waitFor(90) { DownloadManager.shared.items.first { $0.url == s2 }?.state == .completed },
+          "a new link for the same file finishes it", "\(item(s2).map { "\($0.state.rawValue) \($0.error ?? "")" } ?? "no item")")
+    check(item(s2)?.id == expired?.id && onMain { DownloadManager.shared.items.filter { $0.name.hasPrefix("podcast") }.count } == 1,
+          "…as the same download, not a second one")
+    check(same(OUT + "/podcast.bin", WORK + "/srv/podcast.bin"), "…byte-identical")
+
     // 8. The local link server only talks to the extension
     let hdr = "-H 'X-DualDL: 1' -H 'Origin: chrome-extension://test' --max-time 5"
     check(shell("curl -s \(hdr) \(API)/ping").contains("\"ok\":true"), "extension ping answered")

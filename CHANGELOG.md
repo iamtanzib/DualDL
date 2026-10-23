@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 — links that expire in minutes
+
+- Signed links (Amazon S3, Hetzner and other S3 storage, Google Cloud Storage, CloudFront) that only work for a few minutes no longer fail with HTTP 403 halfway: every connection asks for its whole share while the link still works, and those requests keep streaming after it expires.
+- A link that has expired says so ("Click Download on the website again") instead of retrying the dead link on a timer.
+- Sending a new link for a file that's already part-way here carries on with the same download from where it stopped, instead of starting a second one.
+- Prebuilt download: DualDL.zip on the Releases page.
+
 ## 1.0.0 — first public release
 
 - Downloads split into 4 MB ranges over every network line at once (Ethernet + Wi-Fi), with work stealing, resume after pause/quit/crash, and line failover.

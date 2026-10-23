@@ -7,6 +7,9 @@ It can also behave like a difficult server (Google Drive under load):
                         after TOKEN_LIFE requests (403), like an expiring Drive link
   /throttle/<file>      every 3rd request gets 429 + Retry-After: 1
   /norange/<file>       ignores Range and always sends the whole file (200)
+  /signed/<file>?X-Amz-Date=..&X-Amz-Expires=..   an S3-style signed link: new requests get
+                        403 once it expires, ones already running keep streaming;
+                        &drop=N cuts every connection after N MB
   <folder>/.down        while this file exists, everything answers 503
   /embeddedfolderview?id=X   serves <folder>/folder-X.html (a fake Drive folder page)
   /file/d/<id>/view     serves <folder>/<id> (a fake Drive file link)
@@ -18,6 +21,7 @@ import os
 import re
 import socketserver
 import sys
+import calendar
 import time
 import urllib.parse
 
@@ -68,6 +72,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if state["uses"] >= TOKEN_LIFE:
                 state["token"] += 1
                 state["uses"] = 0
+        drop = 0
+        if parts[0] == "signed":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            signed = calendar.timegm(time.strptime(q["X-Amz-Date"][0], "%Y%m%dT%H%M%SZ"))
+            if time.time() > signed + int(q["X-Amz-Expires"][0]):
+                return self.reply(403)
+            drop = int(q.get("drop", ["0"])[0]) << 20
         if parts[0] == "throttle":
             state["throttle"] += 1
             if state["throttle"] % 3 == 0:
@@ -96,8 +107,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with open(path, "rb") as f:
             f.seek(start)
             left = end - start + 1
+            sent = 0
             while left > 0:
+                if drop and sent >= drop:
+                    self.close_connection = True
+                    return
                 block = f.read(min(256 * 1024, left))
+                sent += len(block)
                 try:
                     self.wfile.write(block)
                 except (BrokenPipeError, ConnectionResetError):

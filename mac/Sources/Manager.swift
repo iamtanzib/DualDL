@@ -318,6 +318,15 @@ final class DownloadManager: ObservableObject {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let u = URL(string: s), let scheme = u.scheme?.lowercased(),
               scheme == "http" || scheme == "https", u.host != nil else { return false }
+        // A new link for a file that's already part-way here (signed links expire after a few
+        // minutes, so the site hands out a new one): carry on with it instead of starting over.
+        if video == nil, let i = items.firstIndex(where: { sameFile($0, u, filename) }) {
+            items[i].url = s
+            if let c = cookie, !c.isEmpty { cookies[items[i].id] = c }
+            if let r = referer, !r.isEmpty { items[i].referer = r }
+            if items[i].state == .failed || items[i].state == .paused { resume(items[i].id) } else { save() }
+            return true
+        }
         // Same link twice is fine as video and as MP3, not as two identical downloads
         if items.contains(where: { $0.url == s && $0.mode == video?.mode && ($0.state == .queued || $0.state == .running) })
             || askQueue.contains(where: { $0.url == s && $0.video?.mode == video?.mode }) { return true }
@@ -333,6 +342,17 @@ final class DownloadManager: ObservableObject {
             create(req, folder: folder)
         }
         return true
+    }
+
+    /// The same file behind another link: an unfinished plain download from the same host and
+    /// path where only the query differs, and either both links are signed (the query is just
+    /// the signature) or the file name matches (so page.php?id=1 and ?id=2 stay apart).
+    private func sameFile(_ item: DownloadItem, _ u: URL, _ filename: String?) -> Bool {
+        guard item.kind == nil, item.state != .completed, item.path != nil, u.path.count > 1,
+              let old = URL(string: item.url), old.host == u.host, old.path == u.path else { return false }
+        func signed(_ x: URL) -> Bool { x.query?.lowercased().contains("signature=") == true }
+        let name = filename.flatMap { $0.isEmpty ? nil : ($0 as NSString).lastPathComponent } ?? u.lastPathComponent
+        return (signed(old) && signed(u)) || name == item.name
     }
 
     /// A Drive folder link: read the folder's file list first, then ask where to save it once.

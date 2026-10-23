@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """dualdl.py against a difficult server (tests/range_server.py over loopback, no internet):
-expiring links, throttling (429 + Retry-After), a server ignoring Range, a dead server,
+expiring links, signed S3-style links that die after a few seconds, throttling (429 + Retry-After), a server ignoring Range, a dead server,
 and re-adding a file that's already complete.
 
     python3 robust_test.py <work folder>
@@ -91,6 +91,45 @@ try:
     files = sorted((f["path"], f["name"], f["url"].rsplit("/", 2)[-2]) for f in e.get("files", []))
     check(e.get("name") == "My & Folder" and files == [("", "one.mov", "abc"), ("Inner", "two.mov", "def")],
           "a Drive folder (with a subfolder) lists every file", e)
+
+    # S3-style signed links (PodSpace on Hetzner storage: 10 minutes) on a slower server
+    slow_port = free_port()
+    slow = subprocess.Popen([sys.executable, os.path.join(HERE, "range_server.py"), srv_dir, str(slow_port), "3"])
+    time.sleep(0.6)
+
+    def signed(life, extra=""):
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        return ("http://127.0.0.1:%d/signed/big.bin?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=%s"
+                "&X-Amz-Expires=%d&X-Amz-Signature=abc%s" % (slow_port, stamp, life, extra))
+    try:
+        out = os.path.join(W, "signed")
+        ev, secs = run(signed(3), out, "-n", "2")
+        check(ev[-1]["event"] == "done" and filecmp.cmp(big, os.path.join(out, "big.bin"), shallow=False),
+              "a signed link that expires mid-download still finishes (requests started in time)", ev[-1])
+        print("     (%.0f s for a link that lived 3 s)" % secs)
+
+        out = os.path.join(W, "signed-drop")
+        ev, secs = run(signed(3, "&drop=8"), out, "-n", "2")
+        msg = ev[-1].get("message", "")
+        check(ev[-1]["event"] == "error" and "expired" in msg and ev[-1].get("retry") is False,
+              "connections cut after the link expired: 'link expired', no pointless retries", ev[-1])
+        check(secs < 60, "…and it stops quickly", "%.0f s" % secs)
+        ev, secs = run(signed(600), out, "-n", "2")
+        info = [e for e in ev if e["event"] == "info"]
+        check(ev[-1]["event"] == "done" and info and info[0].get("resumed", 0) >= 16 << 20
+              and filecmp.cmp(big, os.path.join(out, "big.bin"), shallow=False),
+              "a fresh link carries on from where the expired one stopped", (info, ev[-1]))
+
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 700))
+        dead = ("http://127.0.0.1:%d/signed/big.bin?X-Amz-Date=%s&X-Amz-Expires=600&X-Amz-Signature=abc"
+                % (slow_port, stamp))
+        ev, secs = run(dead, os.path.join(W, "signed-dead"))
+        msg = ev[-1].get("message", "")
+        check(ev[-1]["event"] == "error" and "expired" in msg and "10 minutes" in msg
+              and ev[-1].get("retry") is False and secs < 20,
+              "an already expired link says so at once (no retrying)", (ev[-1], secs))
+    finally:
+        slow.terminate()
 
     open(os.path.join(srv_dir, ".down"), "w").close()
     ev, secs = run(base + "/page/big.bin", os.path.join(W, "down"))

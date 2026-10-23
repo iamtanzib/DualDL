@@ -12,6 +12,7 @@ With --json every status update is printed as one JSON object per line, which
 is how the DualDL app drives this script.
 """
 import argparse
+import calendar
 import fcntl
 import http.client
 import json
@@ -25,7 +26,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.parse import unquote, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 IP_BOUND_IF = 25            # macOS <netinet/in.h>: pin a socket to one interface
 CHUNK = 4 * 1024 * 1024     # bytes per range request
@@ -170,6 +171,37 @@ class Fail(SystemExit):
     def __init__(self, message, retry=False):
         super().__init__(message)
         self.retry = retry
+
+
+# ---------------------------------------------------------------- signed links
+
+def link_expiry(url):
+    """(expires at, lifetime in seconds or None) for a signed link that stops working on its
+    own (Amazon S3, Hetzner and other S3 storage, Google Cloud Storage, CloudFront), else None.
+    The server checks the signature when a request starts; a request begun in time keeps going."""
+    q = {k.lower(): v[0] for k, v in parse_qs(urlparse(url).query).items()}
+    for p in ("x-amz-", "x-goog-"):
+        if q.get(p + "date") and q.get(p + "expires", "").isdigit():
+            try:
+                signed = calendar.timegm(time.strptime(q[p + "date"], "%Y%m%dT%H%M%SZ"))
+            except ValueError:
+                return None
+            return signed + int(q[p + "expires"]), int(q[p + "expires"])
+    if q.get("expires", "").isdigit() and len(q["expires"]) >= 9:      # Unix time (S3 v2, CloudFront)
+        return int(q["expires"]), None
+    return None
+
+
+def link_expired(url, slack=30):
+    exp = link_expiry(url)
+    return exp is not None and time.time() >= exp[0] - slack
+
+
+def expired_message(url):
+    exp = link_expiry(url)
+    life = " (this site's links only work for %d minutes)" % max(1, exp[1] // 60) if exp and exp[1] else ""
+    return ("The download link expired%s. Click Download on the website again: DualDL takes the new "
+            "link and carries on from where it stopped." % life)
 
 
 DRIVE_BASE = os.environ.get("DUALDL_DRIVE_BASE", "https://drive.google.com")   # tests point this at a local server
@@ -319,6 +351,8 @@ def probe(url, ifaces, cookies):
             time.sleep(min(int(wait), 30) if wait.isdigit() else 2 ** (busy + 1))
             busy += 1
             continue
+        if resp.status in (400, 401, 403) and link_expired(url):
+            raise Fail(expired_message(url))      # retrying the same link can never work
         raise Fail("The server answered HTTP %d %s." % (resp.status, resp.reason),
                    retry=resp.status in (403, 408, 425, 429) or resp.status >= 500)
     raise Fail("Google Drive kept asking for confirmation; try again in a little while.", retry=True)
@@ -327,8 +361,9 @@ def probe(url, ifaces, cookies):
 # ---------------------------------------------------------------- download
 
 class Job:
-    def __init__(self, info, ifaces, per_iface, part, state_path, refresh=None):
+    def __init__(self, info, ifaces, per_iface, part, state_path, refresh=None, expires=None):
         self.refresh = refresh            # () -> fresh probe info, when links can expire
+        self.expires = expires            # the link we were given stops working then, and no refresh helps
         self.url, self.size = info["url"], info["size"]
         # Per-line URLs for sites that tie a link to the IP that asked for it (YouTube)
         self.urls = info.get("urls") or {}
@@ -367,9 +402,30 @@ class Job:
         self.received = {i: 0 for i in ifaces}
         self.completed = sum(self.chunk_len(i) for i in self.done)
         self.resumed = self.completed
+        # An expiring link gets no new requests once it's dead, so every connection asks for
+        # its whole share up front, in one request, while the link still works.
+        workers = len(ifaces) * per_iface
+        self.span = -(-self.pending.qsize() // workers) if expires else 1
 
     def chunk_len(self, idx):
         return min(CHUNK, self.size - idx * CHUNK)
+
+    def link_dead(self):
+        return self.expires is not None and time.time() >= self.expires
+
+    def claim(self):
+        """The next chunk, plus the ones right after it up to `span`, for one request."""
+        run = [self.pending.get(timeout=0.3)]
+        while len(run) < self.span:
+            try:
+                nxt = self.pending.get_nowait()
+            except queue.Empty:
+                break
+            if nxt != run[-1] + 1:
+                self.pending.put(nxt)
+                break
+            run.append(nxt)
+        return run
 
     def save(self):
         with self.lock:
@@ -383,12 +439,14 @@ class Job:
     def worker(self, ifname):
         conn, conn_for, fails = None, None, 0
         while not self.stop.is_set() and not self.finished():
+            if self.link_dead():
+                break           # a new request can't work; requests already running carry on
             try:
-                idx = self.pending.get(timeout=0.3)
+                run = self.claim()
             except queue.Empty:
                 continue        # a chunk may still be requeued by another worker
-            start = idx * CHUNK
-            end = start + self.chunk_len(idx) - 1
+            start = run[0] * CHUNK
+            end = run[-1] * CHUNK + self.chunk_len(run[-1]) - 1
             pos = start
             # The link can be swapped for a fresh one while we run (see run()).
             with self.lock:
@@ -414,35 +472,41 @@ class Job:
                     if resp.status in (429, 503) and wait.isdigit():
                         time.sleep(min(int(wait), 120))      # the server said how long to wait
                     raise IOError("HTTP %d" % resp.status)
-                while pos <= end:
-                    data = resp.read(min(BLOCK, end - pos + 1))
-                    if not data:
-                        raise IOError("connection closed early")
-                    os.pwrite(self.fd, data, pos)
-                    pos += len(data)
+                for idx in run:
+                    chunk_end = idx * CHUNK + self.chunk_len(idx) - 1
+                    while pos <= chunk_end:
+                        data = resp.read(min(BLOCK, chunk_end - pos + 1))
+                        if not data:
+                            raise IOError("connection closed early")
+                        os.pwrite(self.fd, data, pos)
+                        pos += len(data)
+                        with self.lock:
+                            self.received[ifname] += len(data)
+                            self.completed += len(data)
+                            self.since_refresh += len(data)
+                            self.last_data = time.time()
+                            self.http_errors = 0
+                            self.fails[ifname] = 0
+                        LIMITER.take(len(data))
                     with self.lock:
-                        self.received[ifname] += len(data)
-                        self.completed += len(data)
-                        self.since_refresh += len(data)
-                        self.last_data = time.time()
-                        self.http_errors = 0
-                        self.fails[ifname] = 0
-                    LIMITER.take(len(data))
-                with self.lock:
-                    self.done.add(idx)
+                        self.done.add(idx)
                 fails = 0
             except Exception as e:
                 if conn is not None:
                     conn.close()
                     conn = None
-                self.pending.put(idx)
                 with self.lock:
-                    self.completed -= pos - start     # this chunk starts over
+                    left = [i for i in run if i not in self.done]
+                    if left:
+                        self.completed -= pos - left[0] * CHUNK     # the unfinished chunk starts over
                     self.fails[ifname] += 1
+                for i in left:
+                    self.pending.put(i)
                 fails += 1
                 # A dead line backs off (up to 30 s) and the healthy one takes its chunks;
                 # it rejoins on its own once it works again.
-                time.sleep(min(2 ** fails, 30))
+                if not self.link_dead():
+                    time.sleep(min(2 ** fails, 30))
         if conn is not None:
             conn.close()
 
@@ -475,7 +539,9 @@ class Job:
                     if self.since_refresh > 64 << 20:      # the last fresh link worked for a good while
                         self.refreshes, self.since_refresh = 0, 0
                 print_progress(completed, self.size, speeds, labels, snap, down)
-                if (stalled or refused) and not self.error:
+                # A fresh copy of an expiring link is just as dead, and stopping would cut off
+                # the requests that are still streaming: those run until they finish.
+                if (stalled or refused) and not self.error and not self.expires:
                     self.renew(stalled)
                 if self.error:
                     break
@@ -720,13 +786,17 @@ def download(url, folder, per_iface, only, cookies, name=None, skip_existing=Fal
         return
 
     part, state = path + ".dualdl-part", path + ".dualdl.json"
-    job = Job(info, ifaces, per_iface, part, state, refresh=lambda: probe(url, ifaces, dict(cookies)))
+    exp = link_expiry(url)
+    job = Job(info, ifaces, per_iface, part, state, refresh=lambda: probe(url, ifaces, dict(cookies)),
+              expires=exp and exp[0])
     emit("info", name=os.path.basename(path), path=path, size=job.size, ranges=True,
          resumed=job.resumed)
     if job.resumed:
         say("Resuming: %s already downloaded" % human(job.resumed))
     elapsed = job.run(labels)
     os.close(job.fd)
+    if not job.error and not job.finished() and job.link_dead():
+        raise Fail(expired_message(url))
     if job.error or not job.finished():
         raise Fail(job.error or "The download stopped early.", retry=job.retry or not job.error)
     os.replace(part, path)
