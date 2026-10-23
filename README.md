@@ -8,6 +8,10 @@
 </p>
 
 <p align="center">
+  <a href="https://dualdl.netlify.app"><b>dualdl.netlify.app</b></a> · <a href="https://github.com/iamtanzib/DualDL/releases/latest/download/DualDL.zip"><b>Download for Mac</b></a>
+</p>
+
+<p align="center">
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple">
   <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-arm64-blue">
   <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-native-orange?logo=swift">

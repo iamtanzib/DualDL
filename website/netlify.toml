@@ -1,0 +1,15 @@
+# The download page is plain HTML: nothing to build, publish this folder as-is.
+[build]
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# A short link for Instagram bios and comments: dualdl.netlify.app/download
+[[redirects]]
+  from = "/download"
+  to = "https://github.com/iamtanzib/DualDL/releases/latest/download/DualDL.zip"
+  status = 302
