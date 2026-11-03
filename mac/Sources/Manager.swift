@@ -507,7 +507,12 @@ final class DownloadManager: ObservableObject {
 
     func pump() {
         var running = runs.count
-        for item in items.reversed() where item.state == .queued && runs[item.id] == nil {
+        // Oldest first, but part-done ones lead and a single link goes ahead of Drive folder
+        // files, so a new download doesn't wait behind every file of a big folder.
+        let waiting = items.reversed().filter { $0.state == .queued && runs[$0.id] == nil }
+        let order = waiting.filter { $0.done > 0 } + waiting.filter { $0.done == 0 && $0.group == nil }
+            + waiting.filter { $0.done == 0 && $0.group != nil }
+        for item in order {
             if running >= maxConcurrent { break }
             start(item.id)
             running += 1
@@ -674,16 +679,7 @@ final class DownloadManager: ObservableObject {
             items[i].speeds = [:]
             items[i].down = []
             items[i].stage = nil
-            // Worth another go (expired link, Drive limiting, a line down): schedule it. Progress since
-            // the last failure starts the count again, so a long download can keep going for hours.
-            if e["retry"] as? Bool == true {
-                if items[i].done > items[i].retryBase + (16 << 20) { items[i].retries = 0 }
-                items[i].retryBase = items[i].done
-                if items[i].retries < retryDelays.count {
-                    items[i].retryAt = Date().addingTimeInterval(retryDelays[items[i].retries])
-                    items[i].retries += 1
-                }
-            }
+            if e["retry"] as? Bool == true { scheduleRetry(i) }
             save()
         case "paused":
             if items[i].state == .running { items[i].state = .paused }
@@ -704,10 +700,13 @@ final class DownloadManager: ObservableObject {
             if run.userStopped {
                 items[i].state = .paused
             } else {
+                // The engine died without saying why (a crash): keep its last words, and try again
+                // later like any other temporary failure, since the progress is saved on disk.
                 items[i].state = .failed
-                let tail = String(data: run.stderr, encoding: .utf8)?
-                    .split(separator: "\n").last.map(String.init)
-                items[i].error = tail ?? "Engine bondho hoye geche (code \(code))"
+                let lines = String(data: run.stderr, encoding: .utf8)?.split(separator: "\n") ?? []
+                items[i].error = lines.last.map(String.init) ?? "Engine bondho hoye geche (code \(code))"
+                Self.log("\(items[i].name): engine exited with code \(code)\n" + lines.suffix(20).joined(separator: "\n"))
+                if !items[i].isConvert { scheduleRetry(i) }
             }
             items[i].speeds = [:]
             items[i].down = []
@@ -715,6 +714,35 @@ final class DownloadManager: ObservableObject {
         }
         save()
         pump()
+    }
+
+    /// Worth another go (expired link, Drive limiting, a line down, a crash): schedule it. Progress
+    /// since the last failure starts the count again, and after the longest delay it keeps trying
+    /// at that pace, so a download never just stays stopped.
+    private func scheduleRetry(_ i: Int) {
+        guard let longest = retryDelays.last else { return }
+        if items[i].done > items[i].retryBase + (16 << 20) { items[i].retries = 0 }
+        items[i].retryBase = items[i].done
+        let delay = items[i].retries < retryDelays.count ? retryDelays[items[i].retries] : longest
+        items[i].retryAt = Date().addingTimeInterval(delay)
+        items[i].retries += 1
+    }
+
+    /// The engine's log (engine.log): what each download did and why it stopped.
+    static let logURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["DUALDL_LOG"]
+        ?? NSHomeDirectory() + "/Library/Logs/DualDL/engine.log")
+
+    /// Adds what only the app saw (an engine that died) to the engine's log.
+    static func log(_ text: String) {
+        let line = "\(Date().formatted(.iso8601)) [app] \(text)\n"
+        try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let h = try? FileHandle(forWritingTo: logURL) {
+            h.seekToEndOfFile()
+            h.write(Data(line.utf8))
+            try? h.close()
+        } else {
+            try? Data(line.utf8).write(to: logURL)
+        }
     }
 
     // MARK: - Actions

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A download that stops (Drive limiting, no data, a crash) keeps retrying every hour after the last delay instead of staying stopped for good.
+- An engine that crashes is retried like any other temporary failure.
+- A Drive download that worked and then gets a confusing page ("private", no confirm form) on a fresh link is retried instead of stopping.
+- A single link added while a big Drive folder is downloading starts before the folder's remaining files.
+- `~/Library/Logs/DualDL/engine.log`: what each download did and why it stopped, so problems can be tracked down.
+
 ## 1.1.0 — links that expire in minutes
 
 - Signed links (Amazon S3, Hetzner and other S3 storage, Google Cloud Storage, CloudFront) that only work for a few minutes no longer fail with HTTP 403 halfway: every connection asks for its whole share while the link still works, and those requests keep streaming after it expires.

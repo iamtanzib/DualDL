@@ -18,7 +18,7 @@ Connections per line are a setting (**Settings → General**, 1–8). Google Dri
 
 ## Automatic retries (`mac/Sources/Manager.swift`)
 
-`retryDelays` (default `60,180,600,1800,3600` seconds). The count starts over whenever a retry made real progress, so long downloads can keep going for hours.
+`retryDelays` (default `60,180,600,1800,3600` seconds). The count starts over whenever a retry made real progress, so long downloads can keep going for hours; after the last delay it keeps retrying at that pace.
 
 ## Which lines and ISPs
 

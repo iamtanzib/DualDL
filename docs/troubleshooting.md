@@ -35,5 +35,8 @@ Allow Location for DualDL (**Settings → Network → Show Wi-Fi Name…**). mac
 ### Browsing is slow in general
 **Settings → Network → Wi-Fi check** shows band, signal and link speed. 2.4 GHz with a weak signal is a common culprit; **Look for a Faster Band** finds your router's 5 GHz network.
 
+### A download stopped with a red error
+DualDL retries on its own (1 → 3 → 10 → 30 → 60 min, then every hour) and carries on from where it stopped. To find out why it stopped, look in `~/Library/Logs/DualDL/engine.log` (Finder → Go → Go to Folder…): every request that failed and every stop is there with the time. Send that file along when you report a problem.
+
 ### Starting fresh
 Quit DualDL, then remove `~/Library/Application Support/DualDL/downloads.json` (the list) and/or run `defaults delete app.dualdl.mac` (settings). Downloaded files are never touched.

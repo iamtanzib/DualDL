@@ -38,7 +38,7 @@ macOS sends everything through **one** network connection at a time. If you have
 | 📁 **Google Drive, properly** | File links, big files with the virus-scan prompt, and **whole folder links** (every file, with subfolders). Re-adding a folder skips what's already there. |
 | 🗜️ **Auto-unzip** | Drive's "Download all" pieces (`…-001.zip`, `…-002.zip`) are unzipped into **one** folder as they finish; split archives (`.zip.001`) unzip once every piece is there. |
 | 🎬 **Video & audio** | YouTube and 1,000+ sites via [yt-dlp](https://github.com/yt-dlp/yt-dlp): best quality, MP3 with cover art, and files that **open in QuickTime and Premiere** (VP9/AV1 are converted on the Mac's hardware encoder). |
-| 🛟 **Finishes the job** | Expired links are refreshed mid-download (and a site's new link carries on where the old one stopped), busy servers are waited out, and failed downloads retry on their own (1 → 3 → 10 → 30 → 60 min). Pause, quit, even crash: it resumes where it stopped. |
+| 🛟 **Finishes the job** | Expired links are refreshed mid-download (and a site's new link carries on where the old one stopped), busy servers are waited out, and failed downloads retry on their own (1 → 3 → 10 → 30 → 60 min, then hourly). Pause, quit, even crash: it resumes where it stopped. |
 | 🧩 **Chrome extension** | Catches Chrome's downloads (like FDM), adds *Download with DualDL* to right-click, puts *Best video / 1080p / MP3* buttons on video pages, and can lend the app your login for sites that need it. |
 | 🚀 **Turbo browsing** *(optional)* | A local proxy that spreads Chrome's sites over both lines and fails over if one ISP drops. |
 | 🪶 **Light on your Mac** | Downloads run at low priority, video conversion uses the media engine, and the app idles at a few % CPU. |

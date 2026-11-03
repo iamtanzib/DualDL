@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 IP_BOUND_IF = 25            # macOS <netinet/in.h>: pin a socket to one interface
@@ -44,6 +45,26 @@ HEADERS = {
 }
 SSL_CTX = ssl.create_default_context()
 JSON_MODE = False
+# What every run did and why it stopped, so a download that failed can be looked into later
+LOG_PATH = os.environ.get("DUALDL_LOG") or os.path.expanduser("~/Library/Logs/DualDL/engine.log")
+LOG_MAX = 5 << 20               # then it becomes engine.log.1 and a new one starts
+LOG_TAG = ""                    # the file this run is about
+
+
+def log(text):
+    try:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > LOG_MAX:
+            os.replace(LOG_PATH, LOG_PATH + ".1")
+        with open(LOG_PATH, "a") as f:
+            f.write("%s [%d] %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), os.getpid(), LOG_TAG, text))
+    except OSError:
+        pass                    # a log that can't be written never stops a download
+
+
+def bare(url):
+    """A link without its query, so signatures and tokens stay out of the log."""
+    return urlparse(url)._replace(query="", fragment="").geturl()
 
 
 def say(text):
@@ -52,6 +73,8 @@ def say(text):
 
 
 def emit(event, **data):
+    if event not in ("progress", "folder"):
+        log("%s %s" % (event, json.dumps(data)[:500]))
     if JSON_MODE:
         data["event"] = event
         sys.stdout.write(json.dumps(data) + "\n")
@@ -500,6 +523,7 @@ class Job:
                     if left:
                         self.completed -= pos - left[0] * CHUNK     # the unfinished chunk starts over
                     self.fails[ifname] += 1
+                log("%s bytes %d-%d stopped after %d: %s" % (ifname, start, end, pos - start, e))
                 for i in left:
                     self.pending.put(i)
                 fails += 1
@@ -578,12 +602,15 @@ class Job:
             self.stop.set()
             return
         self.refreshes += 1
+        log("fresh link: %s, last HTTP %s" % ("no data" if stalled else "refused", self.last_status))
         emit("log", message="Getting a fresh download link (try %d)…" % self.refreshes)
         say("  fresh link (try %d)" % self.refreshes)
         try:
             info = self.refresh()
         except SystemExit as e:
-            self.error, self.retry = str(e.code), getattr(e, "retry", True)
+            # This link worked earlier, so whatever it says now (a busy Drive page that reads
+            # like "private") is worth another go later.
+            self.error, self.retry = str(e.code), True
             self.stop.set()
             return
         except Exception as e:
@@ -752,7 +779,9 @@ def interface_list():
 
 
 def download(url, folder, per_iface, only, cookies, name=None, skip_existing=False):
+    global LOG_TAG
     ifaces = only or active_interfaces()
+    log("start %s -> %s via %s" % (bare(url), folder, ",".join(ifaces)))
     hw = hardware_names()
     labels = {i: hw.get(i, i).replace("Wi-Fi", "WiFi") for i in ifaces}
     say("\nLink: %s" % url)
@@ -763,6 +792,8 @@ def download(url, folder, per_iface, only, cookies, name=None, skip_existing=Fal
                    "file in it.")
     info = probe(url, ifaces, dict(cookies))
     clean = (name or info["name"]).replace("/", "_")
+    LOG_TAG = clean
+    log("file %s, %s bytes, ranges %s, from %s" % (clean, info["size"], info["ranges"], bare(info["url"])))
     if skip_existing and info["size"] and os.path.isfile(os.path.join(folder, clean)) \
             and os.path.getsize(os.path.join(folder, clean)) == info["size"]:
         done_path = os.path.join(folder, clean)            # already here in full (re-added folder)
@@ -886,6 +917,7 @@ def main():
         emit("paused")
         sys.exit(130)
     except Exception as e:
+        log(traceback.format_exc())
         if JSON_MODE:
             emit("error", message="%s: %s" % (type(e).__name__, e), retry=isinstance(e, OSError))
             sys.exit(1)
