@@ -18,6 +18,10 @@ DualDL has no accounts, no servers of its own and no telemetry. Everything happe
 - **Plain downloads:** cookies for that site go with the request, and are only ever sent back to the same host, even if the server redirects elsewhere.
 - **"Use my Chrome login"** (off by default): while it's on, the extension hands over cookies for a fixed list of video sites. The app keeps them **in memory**; they touch disk only as a private (`0600`) temp file while yt-dlp runs, deleted right after (and the folder is wiped at every launch). Turning the setting off forgets them at once.
 
+## The log
+
+`~/Library/Logs/DualDL/engine.log` records what each download did: the link **without** its query (so signatures and tokens stay out), the file name and folder, failed requests, and why a download stopped. It stays on your Mac, grows to 5 MB, then starts over (the previous one is kept as `engine.log.1`). Delete it any time.
+
 ## The local link server
 
 The app listens on `127.0.0.1:51977` (loopback only; nothing on your network can reach it). To stop web pages from talking to it:

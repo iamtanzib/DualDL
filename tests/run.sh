@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 NETWORK=0
 [ "${1:-}" = "--network" ] && NETWORK=1
 W=$(mktemp -d -t dualdl-tests)
+export DUALDL_LOG="$W/engine.log"      # keep test runs out of the real log
 SRV_PID=""
 cleanup() {
   [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null

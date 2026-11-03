@@ -115,6 +115,23 @@ Thread.detachNewThread {
     check(leftovers().isEmpty && !FileManager.default.fileExists(atPath: OUT + "/c.bin"),
           "cancel leaves no partial files", "\(leftovers())")
 
+    // 3b. A single link added later still starts before waiting Drive folder files
+    var grouped = DownloadItem(url: SRV + "/a.bin", name: "order-grouped.bin")
+    grouped.group = "Big Folder"
+    grouped.nameFixed = true
+    var lone = DownloadItem(url: SRV + "/b.bin", name: "order-lone.bin")
+    lone.nameFixed = true
+    onMain {
+        let m = DownloadManager.shared
+        m.items.insert(grouped, at: 0)
+        m.items.insert(lone, at: 0)
+        m.pump()
+    }
+    let states = onMain { [grouped.id, lone.id].map { id in DownloadManager.shared.items.first { $0.id == id }?.state } }
+    check(states == [.queued, .running], "a new single link goes ahead of waiting folder files", "\(states)")
+    onMain { for id in [grouped.id, lone.id] { DownloadManager.shared.cancel(id) } }
+    Thread.sleep(forTimeInterval: 2)
+
     // 4. Google Drive pieces download and unzip into one folder
     let parts = ["001", "002", "003"].map { SRV + "/Holiday%20Videos%20-20260101T120000Z-1-\($0).zip" }
     for p in parts { onMain { _ = DownloadManager.shared.add(url: p) } }
@@ -159,6 +176,19 @@ Thread.detachNewThread {
     try? FileManager.default.removeItem(atPath: WORK + "/srv/.down")
     check(waitFor(120) { DownloadManager.shared.items.first { $0.url == r }?.state == .completed }, "it resumes by itself and finishes")
     check(same(OUT + "/retry.bin", WORK + "/srv/retry.bin"), "the retried file is byte-identical")
+
+    // 7a. An engine that dies without a word (a crash) is retried too, and the crash is logged
+    _ = shell("cp '\(WORK)/srv/a.bin' '\(WORK)/srv/crash.bin'")
+    let k = SRV + "/crash.bin"
+    onMain { _ = DownloadManager.shared.add(url: k) }
+    check(waitFor(30) { (DownloadManager.shared.items.first { $0.url == k }?.done ?? 0) > 4 << 20 }, "crash test download starts")
+    _ = shell("pkill -9 -f 'dualdl.py.*crash.bin'")
+    check(waitFor(10) { DownloadManager.shared.items.first { $0.url == k }.map { $0.state == .failed && $0.retryAt != nil } ?? false },
+          "a crashed engine schedules an automatic retry", "\(item(k).map { "\($0.state.rawValue) \($0.error ?? "")" } ?? "missing")")
+    check(waitFor(90) { DownloadManager.shared.items.first { $0.url == k }?.state == .completed }, "…and the download finishes")
+    check(same(OUT + "/crash.bin", WORK + "/srv/a.bin"), "the file after a crash is byte-identical")
+    let logText = (try? String(contentsOf: DownloadManager.logURL, encoding: .utf8)) ?? ""
+    check(logText.contains("crash.bin: engine exited") && logText.contains("start "), "the log has the crash and the engine's runs")
 
     // 7b. A signed link (S3 style) that expires: "link expired", no pointless retry; a new link
     //     for the same file carries on with the same download instead of starting a second one
